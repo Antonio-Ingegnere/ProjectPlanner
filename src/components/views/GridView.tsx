@@ -90,14 +90,18 @@ function WPFullWidthRenderer({ data, context }: { data: WPHeaderRow; context: Gr
     <div
       style={{ ...base, userSelect: 'none' }}
       draggable
-      onDragStart={(e) => { e.stopPropagation(); onWPDragStart(data._wp); }}
+      onMouseDown={(e) => e.stopPropagation()}
+      onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('wp-drag', data._wp); onWPDragStart(data._wp); }}
       onDragOver={(e) => {
+        if (!e.dataTransfer.types.includes('wp-drag')) return;
         e.preventDefault(); e.stopPropagation();
-        if (draggingWP) onWPDragOver(data._wp); // only track for WP-level reordering
+        onWPDragOver(data._wp);
       }}
       onDrop={(e) => {
+        const src = e.dataTransfer.getData('wp-drag');
+        if (!src) return;
         e.preventDefault(); e.stopPropagation();
-        if (draggingWP) onWPDrop(data._wp); // task drops are handled by AG Grid's onRowDragEnd
+        onWPDrop(data._wp);
       }}
       onDragEnd={() => onWPDragEnd()}
     >
