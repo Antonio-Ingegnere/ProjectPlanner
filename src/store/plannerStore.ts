@@ -19,6 +19,8 @@ interface PlannerState {
   deleteTask: (taskId: string) => void;
 
   renameWorkPackage: (projectId: string, oldName: string, newName: string) => void;
+  // Move a task to newWP, inserting before beforeId (null = append after last task of newWP)
+  moveTask: (projectId: string, taskId: string, newWP: string, beforeId: string | null) => void;
   setProjectWPOrder: (projectId: string, order: string[]) => void;
 
   addSkillSet: (projectId: string, skillSet: SkillSet) => void;
@@ -91,6 +93,26 @@ export const usePlannerStore = create<PlannerState>()(
               ),
             }
           ),
+        })),
+
+      moveTask: (projectId, taskId, newWP, beforeId) =>
+        set((state) => ({
+          projects: state.projects.map((p) => {
+            if (p.id !== projectId) return p;
+            const moving = p.tasks.find((t) => t.id === taskId);
+            if (!moving) return p;
+            const updated = { ...moving, workPackage: newWP };
+            const tasks = p.tasks.filter((t) => t.id !== taskId);
+            if (beforeId === null) {
+              // Append after the last task of newWP in the array
+              const lastIdx = tasks.reduce((acc, t, i) => (t.workPackage === newWP ? i : acc), -1);
+              tasks.splice(lastIdx + 1, 0, updated);
+            } else {
+              const insertIdx = tasks.findIndex((t) => t.id === beforeId);
+              tasks.splice(insertIdx === -1 ? tasks.length : insertIdx, 0, updated);
+            }
+            return { ...p, tasks };
+          }),
         })),
 
       setProjectWPOrder: (projectId, order) =>

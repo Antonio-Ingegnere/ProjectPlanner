@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* Hide AG Grid's built-in row drag ghost — we render our own */
+.ag-dnd-ghost { display: none !important; }
+
 @layer base {
   * {
     box-sizing: border-box;

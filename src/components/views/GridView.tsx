@@ -1,7 +1,7 @@
 import { useMemo, useCallback, useEffect, useRef, useState } from 'react';
 import { AgGridReact } from 'ag-grid-react';
 import { themeQuartz } from 'ag-grid-community';
-import type { ColDef, CellValueChangedEvent, GetRowIdParams, IsFullWidthRowParams } from 'ag-grid-community';
+import type { ColDef, CellValueChangedEvent, GetRowIdParams, IsFullWidthRowParams, RowDragMoveEvent, RowDragEndEvent } from 'ag-grid-community';
 import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community';
 import { ChevronDown, ChevronRight, GripVertical, Pencil, Plus } from 'lucide-react';
 import { usePlannerStore } from '@/store/plannerStore';
@@ -35,17 +35,19 @@ interface GridContext {
   onWPDragOver: (wp: string) => void;
   onWPDrop: (wp: string) => void;
   onWPDragEnd: () => void;
+  taskDragOverWP: string | null;
 }
 
 function WPFullWidthRenderer({ data, context }: { data: WPHeaderRow; context: GridContext }) {
   const {
     collapsedWPs, toggleWP, renamingWP, startRenaming, commitRename, cancelRename,
-    draggingWP, dragOverWP, onWPDragStart, onWPDragOver, onWPDrop, onWPDragEnd,
+    draggingWP, dragOverWP, onWPDragStart, onWPDragOver, onWPDrop, onWPDragEnd, taskDragOverWP,
   } = context;
-  const isCollapsed = collapsedWPs.has(data._wp);
-  const isRenaming  = renamingWP === data._wp;
-  const isDragging  = draggingWP === data._wp;
-  const isDragOver  = dragOverWP === data._wp && draggingWP !== data._wp;
+  const isCollapsed    = collapsedWPs.has(data._wp);
+  const isRenaming     = renamingWP === data._wp;
+  const isDragging     = draggingWP === data._wp;
+  const isDragOver     = dragOverWP === data._wp && draggingWP !== data._wp;
+  const isTaskDragOver = taskDragOverWP === data._wp;
   const inputRef    = useRef<HTMLInputElement>(null);
   const [draft, setDraft] = useState(data._wp);
 
@@ -55,12 +57,13 @@ function WPFullWidthRenderer({ data, context }: { data: WPHeaderRow; context: Gr
 
   const base: React.CSSProperties = {
     display: 'flex', alignItems: 'center', height: '100%',
-    padding: '0 12px', background: '#f8fafc',
+    padding: '0 12px',
+    background: isTaskDragOver ? '#dbeafe' : '#f8fafc',
     borderBottom: '1px solid #e2e8f0',
     borderTop: isDragOver ? '2px solid #3b82f6' : '2px solid transparent',
     gap: 8,
     opacity: isDragging ? 0.4 : 1,
-    transition: 'opacity 0.1s',
+    transition: 'opacity 0.1s, background 0.15s',
   };
 
   if (isRenaming) {
@@ -88,8 +91,14 @@ function WPFullWidthRenderer({ data, context }: { data: WPHeaderRow; context: Gr
       style={{ ...base, userSelect: 'none' }}
       draggable
       onDragStart={(e) => { e.stopPropagation(); onWPDragStart(data._wp); }}
-      onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); onWPDragOver(data._wp); }}
-      onDrop={(e) => { e.preventDefault(); e.stopPropagation(); onWPDrop(data._wp); }}
+      onDragOver={(e) => {
+        e.preventDefault(); e.stopPropagation();
+        if (draggingWP) onWPDragOver(data._wp); // only track for WP-level reordering
+      }}
+      onDrop={(e) => {
+        e.preventDefault(); e.stopPropagation();
+        if (draggingWP) onWPDrop(data._wp); // task drops are handled by AG Grid's onRowDragEnd
+      }}
       onDragEnd={() => onWPDragEnd()}
     >
       <GripVertical
@@ -126,7 +135,7 @@ function makeTask(projectId: string, workPackage: string, name: string): Task {
 export function GridView() {
   const {
     visibleTasks, visibleSkillSets, projects, selectedProjectId,
-    updateTask, updateWorkload, addTask, addSkillSet, renameWorkPackage, setProjectWPOrder, wpOrders, settings,
+    updateTask, updateWorkload, addTask, addSkillSet, renameWorkPackage, moveTask, setProjectWPOrder, wpOrders, settings,
   } = usePlannerStore();
 
   const unitLabel = settings.timeUnit === 'sprint'
@@ -141,7 +150,11 @@ export function GridView() {
   );
   const skillSets = visibleSkillSets();
 
-  const newSkillSetIdRef = useRef<string | null>(null);
+  const newSkillSetIdRef    = useRef<string | null>(null);
+  const gridContainerRef    = useRef<HTMLDivElement>(null);
+  const rawTasksRef         = useRef(rawTasks);
+  rawTasksRef.current       = rawTasks;
+  const [dragGhost, setDragGhost] = useState<{ x: number; y: number; task: Task } | null>(null);
   const [collapsedWPs, setCollapsedWPs] = useState<Set<string>>(new Set());
   const [newWPName, setNewWPName]       = useState('');
   const [isAddingWP, setIsAddingWP]     = useState(false);
@@ -151,6 +164,7 @@ export function GridView() {
   const [extraWPs, setExtraWPs]         = useState<string[]>([]);
   const [draggingWP, setDraggingWP]     = useState<string | null>(null);
   const [dragOverWP, setDragOverWP]     = useState<string | null>(null);
+  const [taskDragOverWP, setTaskDragOverWP] = useState<string | null>(null);
 
   const wpOrderManual = wpOrders[selectedProjectId ?? ''] ?? null;
 
@@ -298,6 +312,11 @@ export function GridView() {
         headerName: 'Work Package',
         width: 200,
         editable: false,
+        rowDrag: (params) => isTask(params.data as GridRow),
+        rowDragText: (params) => {
+          const data = params.rowNode.data as GridRow;
+          return isTask(data) ? data.name : '';
+        },
         valueGetter: (params) => {
           const row = params.data;
           if (!row || isWPHeader(row)) return '';
@@ -356,6 +375,7 @@ export function GridView() {
     updateTask((row as Task).id, { [event.colDef.field as keyof Task]: event.newValue });
   }, [selectedProjectId, projects, addTask, updateTask]);
 
+
   const isFullWidthRow = useCallback(
     (params: IsFullWidthRowParams<GridRow>) => isWPHeader(params.rowNode.data as GridRow),
     [],
@@ -368,11 +388,59 @@ export function GridView() {
     return (row as Task).id;
   }, []);
 
+  const onRowDragMove = useCallback((e: RowDragMoveEvent<GridRow>) => {
+    const over = e.overNode?.data as GridRow | undefined;
+    let wp: string | null = null;
+    if (over) {
+      if (isWPHeader(over)) wp = over._wp;
+      else if (isBlank(over)) wp = over._wp;
+      else if (isTask(over)) wp = over.workPackage;
+    }
+    setTaskDragOverWP((prev) => prev === wp ? prev : wp);
+
+    const dragged = e.node.data as GridRow;
+    if (isTask(dragged)) {
+      setDragGhost({ x: e.event.clientX, y: e.event.clientY, task: dragged });
+    }
+  }, []);
+
+  const onRowDragEnd = useCallback((e: RowDragEndEvent<GridRow>) => {
+    const dragged = e.node.data as GridRow;
+    const over    = e.overNode?.data as GridRow | undefined;
+
+    if (!isTask(dragged) || !over) { setTaskDragOverWP(null); return; }
+
+    const projectId = selectedProjectId ?? projects[0]?.id;
+    if (!projectId) { setTaskDragOverWP(null); return; }
+
+    if (isWPHeader(over) || isBlank(over)) {
+      // Append to end of the target WP
+      moveTask(projectId, dragged.id, over._wp, null);
+    } else if (isTask(over) && over.id !== dragged.id) {
+      const draggedRowIdx = e.node.rowIndex ?? 0;
+      const overRowIdx    = e.overNode!.rowIndex ?? 0;
+
+      if (draggedRowIdx < overRowIdx) {
+        // Dragging downward: place after 'over' within its WP
+        const wpTasks  = rawTasks.filter((t) => t.workPackage === over.workPackage);
+        const overPos  = wpTasks.findIndex((t) => t.id === over.id);
+        const nextTask = wpTasks[overPos + 1]; // task immediately after 'over' in this WP
+        moveTask(projectId, dragged.id, over.workPackage, nextTask?.id ?? null);
+      } else {
+        // Dragging upward: place before 'over'
+        moveTask(projectId, dragged.id, over.workPackage, over.id);
+      }
+    }
+
+    setTaskDragOverWP(null);
+    setDragGhost(null);
+  }, [selectedProjectId, projects, moveTask, rawTasks]);
+
   const context = useMemo<GridContext>(() => ({
     collapsedWPs, toggleWP, renamingWP, startRenaming, commitRename, cancelRename,
-    draggingWP, dragOverWP, onWPDragStart, onWPDragOver, onWPDrop, onWPDragEnd,
+    draggingWP, dragOverWP, onWPDragStart, onWPDragOver, onWPDrop, onWPDragEnd, taskDragOverWP,
   }), [collapsedWPs, toggleWP, renamingWP, startRenaming, commitRename, cancelRename,
-       draggingWP, dragOverWP, onWPDragStart, onWPDragOver, onWPDrop, onWPDragEnd]);
+       draggingWP, dragOverWP, onWPDragStart, onWPDragOver, onWPDrop, onWPDragEnd, taskDragOverWP]);
 
   useEffect(() => {
     if (newSkillSetIdRef.current && skillSets.some((s) => s.id === newSkillSetIdRef.current)) {
@@ -429,13 +497,63 @@ export function GridView() {
         </div>
       )}
 
-      <div className="flex-1 p-4">
+      {dragGhost && (
+        <div
+          style={{
+            position: 'fixed',
+            left: dragGhost.x + 16,
+            top: dragGhost.y - 22,
+            zIndex: 9999,
+            pointerEvents: 'none',
+            display: 'flex',
+            alignItems: 'stretch',
+            height: 44,
+            background: 'white',
+            border: '1px solid #e2e8f0',
+            borderRadius: 8,
+            boxShadow: '0 4px 16px rgba(0,0,0,0.14)',
+            fontFamily: 'inherit',
+            fontSize: 13,
+            color: '#1e293b',
+            overflow: 'hidden',
+          }}
+        >
+          {[
+            { text: dragGhost.task.workPackage, width: 200, bold: false, right: false },
+            { text: dragGhost.task.name,        width: 240, bold: true,  right: false },
+            ...skillSets.map((ss) => ({
+              text: dragGhost.task.workload?.[ss.id] ? String(dragGhost.task.workload[ss.id]) : '—',
+              width: 110, bold: false, right: true,
+            })),
+          ].map((cell, i) => (
+            <div
+              key={i}
+              style={{
+                width: cell.width, minWidth: cell.width,
+                padding: '0 12px',
+                display: 'flex', alignItems: 'center',
+                justifyContent: cell.right ? 'flex-end' : 'flex-start',
+                borderRight: '1px solid #e2e8f0',
+                fontWeight: cell.bold ? 600 : 400,
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {cell.text}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="flex-1 p-4" ref={gridContainerRef}>
         <AgGridReact<GridRow>
           theme={themeQuartz}
           rowData={rowData}
           columnDefs={columnDefs}
           defaultColDef={defaultColDef}
           onCellValueChanged={onCellValueChanged}
+          onRowDragMove={onRowDragMove}
+          onRowDragEnd={onRowDragEnd}
+          onRowDragLeave={() => { setTaskDragOverWP(null); setDragGhost(null); }}
           rowHeight={44}
           headerHeight={40}
           isFullWidthRow={isFullWidthRow}
