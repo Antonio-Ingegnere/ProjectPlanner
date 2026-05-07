@@ -5,6 +5,9 @@ import type { SkillSet } from '@/types';
 
 const UNIT_PX = 80;   // pixels per sprint/week/month
 const LEFT_W = 160;
+const SUM_W = 64;
+const FTE_W = 72;
+const FIXED_W = LEFT_W + SUM_W + FTE_W;
 const ROW_H = 48;
 const WP_HEADER_H = 30;
 const UNIT_HEADER_H = 30;
@@ -12,10 +15,9 @@ const TOTAL_HEADER_H = WP_HEADER_H + UNIT_HEADER_H;
 
 const WP_BG = ['#eff6ff', '#f5f3ff', '#f0fdf4', '#fffbeb', '#fff1f2'];
 const WP_BORDER = ['#bfdbfe', '#ddd6fe', '#bbf7d0', '#fde68a', '#fecdd3'];
-const BAR_COLOR = ['#3b82f6', '#8b5cf6', '#22c55e', '#f59e0b', '#f43f5e'];
 
 export function GanttView() {
-  const { visibleTasks, visibleSkillSets, selectedProjectId, reorderSkillSets, settings, wpOrders } = usePlannerStore();
+  const { visibleTasks, visibleSkillSets, selectedProjectId, reorderSkillSets, updateSkillSetFTE, settings, wpOrders } = usePlannerStore();
   const { timeUnit, sprintDays } = settings;
 
   const [orderedSkillSets, setOrderedSkillSets] = useState<SkillSet[]>([]);
@@ -28,7 +30,7 @@ export function GanttView() {
   useEffect(() => {
     setOrderedSkillSets(skillSets);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [skillSets.map((s) => s.id).join(',')]);
+  }, [skillSets.map((s) => `${s.id}:${s.fte}`).join(',')]);
 
   const handleDragStart = (index: number) => { dragIndexRef.current = index; };
   const handleDragOver = (e: React.DragEvent, index: number) => { e.preventDefault(); setDragOverIndex(index); };
@@ -124,13 +126,13 @@ export function GanttView() {
           {/* ── Double-row sticky header ── */}
           <div
             className="sticky top-0 z-20 bg-white border-b"
-            style={{ minWidth: LEFT_W + totalWidth }}
+            style={{ minWidth: FIXED_W + totalWidth }}
           >
             {/* Row 1: Work package names */}
             <div className="flex" style={{ height: WP_HEADER_H }}>
               <div
                 className="sticky left-0 z-30 bg-white border-r border-b shrink-0"
-                style={{ width: LEFT_W }}
+                style={{ width: FIXED_W }}
               />
               {wpBlocks.map((block, i) => (
                 <div
@@ -153,9 +155,13 @@ export function GanttView() {
             {/* Row 2: Sequential unit numbers */}
             <div className="flex" style={{ height: UNIT_HEADER_H }}>
               <div
-                className="sticky left-0 z-30 bg-white border-r shrink-0"
-                style={{ width: LEFT_W }}
-              />
+                className="sticky left-0 z-30 bg-white border-r shrink-0 flex"
+                style={{ width: FIXED_W }}
+              >
+                <div style={{ width: LEFT_W }} className="border-r" />
+                <div style={{ width: SUM_W }} className="border-r flex items-center justify-end px-2 text-xs text-gray-400 font-medium">Sum</div>
+                <div style={{ width: FTE_W }} className="flex items-center justify-end px-2 text-xs text-gray-400 font-medium">FTE %</div>
+              </div>
               {wpBlocks.map((block, i) =>
                 Array.from({ length: block.duration }, (_, u) => (
                   <div
@@ -178,11 +184,13 @@ export function GanttView() {
           {/* ── Skill rows ── */}
           {orderedSkillSets.map((ss, index) => {
             const isDragOver = dragOverIndex === index;
+            const totalLoad = wpBlocks.reduce((sum, block) => sum + (matrix[block.wp]?.[ss.id] ?? 0), 0);
+            const fte = ss.fte ?? 100;
             return (
               <div
                 key={ss.id}
                 className={`flex border-b transition-colors ${isDragOver ? 'bg-blue-50' : ''}`}
-                style={{ minWidth: LEFT_W + totalWidth, height: ROW_H }}
+                style={{ minWidth: FIXED_W + totalWidth, height: ROW_H }}
                 draggable
                 onDragStart={() => handleDragStart(index)}
                 onDragOver={(e) => handleDragOver(e, index)}
@@ -198,54 +206,77 @@ export function GanttView() {
                   <span className="truncate">{ss.name}</span>
                 </div>
 
+                {/* Sum column */}
+                <div
+                  className={`sticky z-10 border-r shrink-0 flex items-center justify-end px-2 text-sm text-gray-700 tabular-nums transition-colors ${isDragOver ? 'bg-blue-50' : 'bg-gray-50'}`}
+                  style={{ left: LEFT_W, width: SUM_W }}
+                >
+                  {totalLoad > 0 ? <span>{totalLoad}<span className="text-gray-400 text-xs ml-0.5">{unitAbbr}</span></span> : <span className="text-gray-300">—</span>}
+                </div>
+
+                {/* FTE % column — editable */}
+                <div
+                  className={`sticky z-10 border-r shrink-0 flex items-center justify-end px-2 gap-0.5 transition-colors ${isDragOver ? 'bg-blue-50' : 'bg-gray-50'}`}
+                  style={{ left: LEFT_W + SUM_W, width: FTE_W }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
+                  <input
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={fte}
+                    onChange={(e) => {
+                      const v = Math.min(100, Math.max(1, Number(e.target.value) || 1));
+                      if (selectedProjectId) updateSkillSetFTE(selectedProjectId, ss.id, v);
+                    }}
+                    className="w-10 text-right text-sm font-medium text-gray-700 bg-transparent border-none outline-none tabular-nums"
+                  />
+                  <span className="text-gray-400 text-xs">%</span>
+                </div>
+
                 {/* Timeline area */}
                 <div className="relative" style={{ width: totalWidth, height: ROW_H }}>
-                  {/* WP background bands + unit grid lines */}
-                  {wpBlocks.map((block, i) => (
-                    <div
-                      key={block.wp}
-                      className="absolute top-0 bottom-0"
-                      style={{
-                        left: block.startUnit * UNIT_PX,
-                        width: block.duration * UNIT_PX,
-                        backgroundColor: WP_BG[i % WP_BG.length],
-                        borderLeft: `2px solid ${WP_BORDER[i % WP_BORDER.length]}`,
-                      }}
-                    >
-                      {/* Unit dividers */}
-                      {Array.from({ length: block.duration }, (_, u) => (
-                        <div
-                          key={u}
-                          className="absolute top-0 bottom-0 border-r border-gray-200"
-                          style={{ left: u * UNIT_PX, width: UNIT_PX }}
-                        />
-                      ))}
-                    </div>
-                  ))}
-
-                  {/* Workload bars — one per WP */}
+                  {/* Colored unit cells: green = calendar time needed at given FTE, red = idle */}
                   {wpBlocks.map((block, i) => {
                     const load = matrix[block.wp]?.[ss.id] ?? 0;
+                    // How many calendar units this skill occupies at the given FTE
+                    const greenCount = load > 0 ? Math.min(Math.ceil(load / (fte / 100)), block.duration) : 0;
+                    return Array.from({ length: block.duration }, (_, u) => (
+                      <div
+                        key={`${block.wp}-${u}`}
+                        className="absolute top-0 bottom-0"
+                        style={{
+                          left: (block.startUnit + u) * UNIT_PX,
+                          width: UNIT_PX,
+                          backgroundColor: u < greenCount ? (fte < 100 ? '#fef9c3' : '#dcfce7') : '#fee2e2',
+                          borderLeft: u === 0
+                            ? `2px solid ${WP_BORDER[i % WP_BORDER.length]}`
+                            : '1px solid #e5e7eb',
+                          borderRight: '1px solid #e5e7eb',
+                        }}
+                      />
+                    ));
+                  })}
+
+                  {/* Load label centered over the green (covered) section */}
+                  {wpBlocks.map((block) => {
+                    const load = matrix[block.wp]?.[ss.id] ?? 0;
                     if (load === 0) return null;
-                    const barWidth = load * UNIT_PX;
+                    const greenCount = Math.min(Math.ceil(load / (fte / 100)), block.duration);
                     return (
                       <div
                         key={block.wp}
-                        title={`${ss.name} · ${block.wp}: ${load} ${unitAbbr}`}
-                        className="absolute rounded-sm flex items-center px-2 overflow-hidden"
+                        title={`${ss.name} · ${block.wp}: ${load} ${unitAbbr} @ ${fte}% FTE`}
+                        className="absolute flex items-center justify-center pointer-events-none"
                         style={{
-                          left: block.startUnit * UNIT_PX + 2,
-                          top: 8,
-                          width: barWidth - 4,
-                          height: ROW_H - 16,
-                          backgroundColor: BAR_COLOR[i % BAR_COLOR.length],
-                          opacity: 0.85,
+                          left: block.startUnit * UNIT_PX,
+                          width: greenCount * UNIT_PX,
+                          top: 0,
+                          height: ROW_H,
                         }}
-                        onMouseEnter={(e) => ((e.currentTarget as HTMLDivElement).style.opacity = '1')}
-                        onMouseLeave={(e) => ((e.currentTarget as HTMLDivElement).style.opacity = '0.85')}
                       >
-                        <span className="text-xs text-white font-semibold leading-none">
-                          {load}<span className="font-normal opacity-80 ml-0.5">{unitAbbr}</span>
+                        <span className="text-xs font-semibold" style={{ color: fte < 100 ? '#854d0e' : '#166534' }}>
+                          {load}<span className="font-normal opacity-70 ml-0.5">{unitAbbr}</span>
                         </span>
                       </div>
                     );

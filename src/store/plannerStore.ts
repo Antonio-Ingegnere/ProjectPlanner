@@ -25,6 +25,7 @@ interface PlannerState {
 
   addSkillSet: (projectId: string, skillSet: SkillSet) => void;
   renameSkillSet: (projectId: string, skillSetId: string, name: string) => void;
+  updateSkillSetFTE: (projectId: string, skillSetId: string, fte: number) => void;
   removeSkillSet: (projectId: string, skillSetId: string) => void;
   reorderSkillSets: (projectId: string, orderedIds: string[]) => void;
 
@@ -136,6 +137,15 @@ export const usePlannerStore = create<PlannerState>()(
           ),
         })),
 
+      updateSkillSetFTE: (projectId, skillSetId, fte) =>
+        set((state) => ({
+          projects: state.projects.map((p) =>
+            p.id === projectId
+              ? { ...p, skillSets: (p.skillSets ?? []).map((s) => s.id === skillSetId ? { ...s, fte } : s) }
+              : p
+          ),
+        })),
+
       removeSkillSet: (projectId, skillSetId) =>
         set((state) => ({
           projects: state.projects.map((p) =>
@@ -174,12 +184,12 @@ export const usePlannerStore = create<PlannerState>()(
     }),
     {
       name: 'planner-storage',
-      version: 2,
+      version: 3,
       migrate: (stored) => {
         const state = stored as { projects: Project[]; selectedProjectId: string | null; settings?: PlannerSettings; wpOrders?: Record<string, string[]> };
         state.projects = state.projects.map((p) => ({
           ...p,
-          skillSets: p.skillSets ?? [],
+          skillSets: (p.skillSets ?? []).map((s) => ({ fte: 100, ...s })),
           tasks: p.tasks.map((t) => ({ ...t, workload: (t as Task & { workload?: Record<string, number> }).workload ?? {} })),
         }));
         state.settings = state.settings ?? DEFAULT_SETTINGS;

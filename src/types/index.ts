@@ -9,6 +9,7 @@ export interface PlannerSettings {
 export interface SkillSet {
   id: string;
   name: string;
+  fte: number; // 1–100 percent
 }
 
 export interface Task {

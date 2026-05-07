@@ -5,9 +5,9 @@ export const mockProjects: Project[] = [
     id: 'proj-1',
     name: 'Website Redesign',
     skillSets: [
-      { id: 'ss-1', name: 'Design' },
-      { id: 'ss-2', name: 'Frontend' },
-      { id: 'ss-3', name: 'Backend' },
+      { id: 'ss-1', name: 'Design', fte: 100 },
+      { id: 'ss-2', name: 'Frontend', fte: 100 },
+      { id: 'ss-3', name: 'Backend', fte: 100 },
     ],
     tasks: [
       // Discovery
@@ -32,9 +32,9 @@ export const mockProjects: Project[] = [
     id: 'proj-2',
     name: 'Mobile App v2',
     skillSets: [
-      { id: 'ss-4', name: 'iOS' },
-      { id: 'ss-5', name: 'Android' },
-      { id: 'ss-6', name: 'QA' },
+      { id: 'ss-4', name: 'iOS', fte: 100 },
+      { id: 'ss-5', name: 'Android', fte: 100 },
+      { id: 'ss-6', name: 'QA', fte: 100 },
     ],
     tasks: [
       // Discovery
